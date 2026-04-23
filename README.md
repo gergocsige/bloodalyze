@@ -54,8 +54,8 @@ A lightweight, AI-powered web application that analyzes uploaded blood test resu
    ```toml
    GEMINI_API_KEY = "your_actual_api_key_here"
    ```
-   > [!WARNING]  
-   > **Do NOT commit `.streamlit/secrets.toml` to Git!** This file should remain excluded in `.gitignore` to prevent leaking your private API keys.
+> [!WARNING]  
+> **Do NOT commit `.streamlit/secrets.toml` to Git!** This file should remain excluded in `.gitignore` to prevent leaking your private API keys.
 
 ## 🚀 Usage
 
