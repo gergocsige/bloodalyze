@@ -4,6 +4,7 @@ from google.genai import types
 from pydantic import BaseModel, Field
 import pandas as pd
 import json
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 # Define the Pydantic schema for structured output
 class Metric(BaseModel):
@@ -64,15 +65,19 @@ def main():
                     )
 
                     # Multimodal AI Call with Structured Outputs
-                    response = client.models.generate_content(
-                        model='gemini-2.5-flash',
-                        contents=[part, SYSTEM_PROMPT],
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                            response_schema=BloodTestAnalysis,
-                            temperature=0.1, # Low temperature for more deterministic extraction
+                    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=2, max=10))
+                    def _generate_content():
+                        return client.models.generate_content(
+                            model='gemini-3.1-flash-lite',
+                            contents=[part, SYSTEM_PROMPT],
+                            config=types.GenerateContentConfig(
+                                response_mime_type="application/json",
+                                response_schema=BloodTestAnalysis,
+                                temperature=0.1, # Low temperature for more deterministic extraction
+                            )
                         )
-                    )
+                    
+                    response = _generate_content()
 
                     # Parse JSON Output
                     result_json = json.loads(response.text)

@@ -1,3 +1,4 @@
 streamlit==1.56.0
 google-genai==1.73.1
 pydantic==2.13.3
+tenacity==9.1.4
