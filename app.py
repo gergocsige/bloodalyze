@@ -65,10 +65,10 @@ def main():
                     )
 
                     # Multimodal AI Call with Structured Outputs
-                    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=2, max=10))
+                    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=2, max=10), reraise=True)
                     def _generate_content():
                         return client.models.generate_content(
-                            model='gemini-3.1-flash-lite',
+                            model='gemini-3.1-flash-lite-preview',
                             contents=[part, SYSTEM_PROMPT],
                             config=types.GenerateContentConfig(
                                 response_mime_type="application/json",
