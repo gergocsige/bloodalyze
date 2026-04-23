@@ -85,24 +85,27 @@ def main():
                     if "metrics" in result_json and len(result_json["metrics"]) > 0:
                         st.subheader("Analysis Results")
                         
-                        df = pd.DataFrame(result_json["metrics"])
+                        out_of_range = [m for m in result_json["metrics"] if m.get("status") != "Normal"]
                         
-                        # Apply styling based on status
-                        def style_status(val):
-                            if val == 'High' or val == 'Low':
-                                return 'color: red; font-weight: bold;'
-                            elif val == 'Normal':
-                                return 'color: green;'
-                            return ''
-                        
-                        # Use applymap for older pandas, map for newer.
-                        # pandas >= 2.1.0 deprecated applymap in favor of map.
-                        if hasattr(df.style, 'map'):
-                            styled_df = df.style.map(style_status, subset=['status'])
+                        if not out_of_range:
+                            st.success("Great news! All analyzed metrics are within the standard normal ranges.")
+                            st.balloons()
                         else:
-                            styled_df = df.style.applymap(style_status, subset=['status'])
-                            
-                        st.dataframe(styled_df, use_container_width=True)
+                            st.markdown("### Attention Needed")
+                            for m in out_of_range:
+                                status = m.get('status')
+                                name = m.get('metric_name')
+                                value = m.get('patient_value')
+                                ref_range = m.get('standard_range')
+                                tip = m.get('improvement_tip')
+                                
+                                with st.expander(f"⚠️ {name} - {status}", expanded=True):
+                                    st.error(f"**Status:** {status}")
+                                    col1, col2 = st.columns(2)
+                                    col1.metric("Patient Value", value)
+                                    col2.metric("Standard Range", ref_range)
+                                    
+                                    st.markdown(f"**💡 Tip:** {tip}")
                     else:
                         st.warning("No metrics could be extracted from the provided document.")
 
