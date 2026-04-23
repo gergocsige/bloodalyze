@@ -39,92 +39,121 @@ For each metric found in the uploaded test, extract the following fields and for
 - improvement_tip: If the status is "High" or "Low", provide a brief, general lifestyle tip in {language}. If the status is "Normal", output "N/A".
 """
 
+@st.cache_data(show_spinner=False)
+def analyze_blood_test(file_bytes: bytes, mime_type: str, api_key: str, lang: str) -> dict:
+    client = genai.Client(api_key=api_key)
+    part = types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
+    
+    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=2, max=10), reraise=True)
+    def _generate_content():
+        return client.models.generate_content(
+            model='gemini-3.1-flash-lite-preview',
+            contents=[part, SYSTEM_PROMPT.format(language=lang)],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=BloodTestAnalysis,
+                temperature=0.1, # Low temperature for more deterministic extraction
+            )
+        )
+    
+    response = _generate_content()
+    return json.loads(response.text)
+
+def update_lang():
+    st.session_state.persistent_lang = st.session_state.lang_widget
+
 def main():
     st.set_page_config(page_title="Bloodalyze", page_icon="🩸", layout="wide")
 
-    if 'language' not in st.session_state:
-        st.session_state.language = 'English'
+    if 'persistent_lang' not in st.session_state:
+        st.session_state.persistent_lang = 'English'
     
-    st.sidebar.radio("Language / Nyelv", ["English", "Magyar"], key="language")
-    lang = st.session_state.language
+    # Determine language first to translate the UI elements below
+    lang = st.session_state.persistent_lang
     t = translations[lang]
 
-    # Strict Medical Disclaimer
-    st.warning(t["disclaimer_warning"])
-    st.page_link("pages/Disclaimer.py", label=t["read_disclaimer"], icon="ℹ️")
+    # Row 1: Title & Description (Left) and Language Toggle (Right)
+    r1_col1, r1_col2 = st.columns([4, 1])
+    with r1_col1:
+        st.title(t["page_title"])
+        st.markdown(t["upload_desc"])
+    with r1_col2:
+        st.radio("Language / Nyelv", ["English", "Magyar"], 
+                 index=["English", "Magyar"].index(st.session_state.persistent_lang),
+                 key="lang_widget", 
+                 on_change=update_lang, 
+                 horizontal=True)
 
-    st.title(t["page_title"])
-    st.markdown(t["upload_desc"])
+    # Row 2: Disclaimers
+    # Using [1, 4] ratio so the warning box is only as wide as its text
+    # and the disclaimer link sits comfortably next to it.
+    r2_col1, r2_col2 = st.columns([1, 4])
+    with r2_col1:
+        st.warning(t["disclaimer_warning"])
+    with r2_col2:
+        st.page_link("pages/Disclaimer.py", label=t["read_disclaimer"], icon="ℹ️")
 
     # File Uploader
-    uploaded_file = st.file_uploader(t["choose_file"], type=['png', 'jpg', 'jpeg', 'pdf'])
+    if 'analysis_results' not in st.session_state:
+        st.session_state.analysis_results = None
 
-    if uploaded_file is not None:
-        if st.button(t["analyze_btn"], type="primary"):
-            if "GEMINI_API_KEY" not in st.secrets or not st.secrets["GEMINI_API_KEY"] or st.secrets["GEMINI_API_KEY"] == "YOUR_API_KEY_HERE":
-                st.error(t["api_key_error"])
-                return
-
-            with st.spinner(t["analyzing_spinner"]):
-                try:
-                    # Initialize the client
-                    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-                    
-                    mime_type = uploaded_file.type
-                    part = types.Part.from_bytes(
-                        data=uploaded_file.getvalue(),
-                        mime_type=mime_type,
-                    )
-
-                    # Multimodal AI Call with Structured Outputs
-                    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=2, max=10), reraise=True)
-                    def _generate_content():
-                        return client.models.generate_content(
-                            model='gemini-3.1-flash-lite-preview',
-                            contents=[part, SYSTEM_PROMPT.format(language=lang)],
-                            config=types.GenerateContentConfig(
-                                response_mime_type="application/json",
-                                response_schema=BloodTestAnalysis,
-                                temperature=0.1, # Low temperature for more deterministic extraction
-                            )
+    if st.session_state.analysis_results is None:
+        uploaded_file = st.file_uploader(t["choose_file"], type=['png', 'jpg', 'jpeg', 'pdf'])
+    
+        if uploaded_file is not None:
+            if st.button(t["analyze_btn"], type="primary"):
+                if "GEMINI_API_KEY" not in st.secrets or not st.secrets["GEMINI_API_KEY"] or st.secrets["GEMINI_API_KEY"] == "YOUR_API_KEY_HERE":
+                    st.error(t["api_key_error"])
+                    return
+    
+                with st.spinner(t["analyzing_spinner"]):
+                    try:
+                        result_json = analyze_blood_test(
+                            file_bytes=uploaded_file.getvalue(),
+                            mime_type=uploaded_file.type,
+                            api_key=st.secrets["GEMINI_API_KEY"],
+                            lang=lang
                         )
+                        st.session_state.analysis_results = result_json
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"{t['error_occurred']}{e}")
+    else:
+        result_json = st.session_state.analysis_results
+        
+        if "metrics" in result_json and len(result_json["metrics"]) > 0:
+            st.subheader(t["analysis_results"])
+            
+            # We must accept translated normal values too
+            normal_values = ["Normal", "Normál"]
+            out_of_range = [m for m in result_json["metrics"] if m.get("status") not in normal_values]
+            
+            if not out_of_range:
+                st.success(t["all_normal"])
+                st.balloons()
+            else:
+                st.markdown(t["attention_needed"])
+                for m in out_of_range:
+                    status = m.get('status')
+                    name = m.get('metric_name')
+                    value = m.get('patient_value')
+                    ref_range = m.get('standard_range')
+                    tip = m.get('improvement_tip')
                     
-                    response = _generate_content()
-
-                    # Parse JSON Output
-                    result_json = json.loads(response.text)
-                    
-                    if "metrics" in result_json and len(result_json["metrics"]) > 0:
-                        st.subheader(t["analysis_results"])
+                    with st.expander(f"⚠️ {name} - {status}", expanded=True):
+                        st.error(f"**{t['status_label']}:** {status}")
+                        col1, col2 = st.columns(2)
+                        col1.metric(t["patient_value_label"], value)
+                        col2.metric(t["standard_range_label"], ref_range)
                         
-                        # We must accept translated normal values too
-                        normal_values = ["Normal", "Normál"]
-                        out_of_range = [m for m in result_json["metrics"] if m.get("status") not in normal_values]
-                        
-                        if not out_of_range:
-                            st.success(t["all_normal"])
-                            st.balloons()
-                        else:
-                            st.markdown(t["attention_needed"])
-                            for m in out_of_range:
-                                status = m.get('status')
-                                name = m.get('metric_name')
-                                value = m.get('patient_value')
-                                ref_range = m.get('standard_range')
-                                tip = m.get('improvement_tip')
-                                
-                                with st.expander(f"⚠️ {name} - {status}", expanded=True):
-                                    st.error(f"**{t['status_label']}:** {status}")
-                                    col1, col2 = st.columns(2)
-                                    col1.metric(t["patient_value_label"], value)
-                                    col2.metric(t["standard_range_label"], ref_range)
-                                    
-                                    st.markdown(f"**💡 {t['tip_label']}:** {tip}")
-                    else:
-                        st.warning(t["no_metrics"])
-
-                except Exception as e:
-                    st.error(f"{t['error_occurred']}{e}")
+                        st.markdown(f"**💡 {t['tip_label']}:** {tip}")
+        else:
+            st.warning(t["no_metrics"])
+            
+        st.markdown("---")
+        if st.button(t["clear_results_btn"]):
+            del st.session_state.analysis_results
+            st.rerun()
 
 if __name__ == "__main__":
     main()

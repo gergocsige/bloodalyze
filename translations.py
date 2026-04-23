@@ -29,7 +29,8 @@ The artificial intelligence model (Gemini) powering this application can halluci
 
 By using this application, you acknowledge that the analysis provided is for educational and demonstrational purposes only.
 """,
-        "return_analyzer": "Return to Analyzer"
+        "return_analyzer": "Return to Analyzer",
+        "clear_results_btn": "Clear Results & Start Over"
     },
     "Magyar": {
         "page_title": "🩸 Vérkép Elemző",
@@ -61,6 +62,7 @@ Az alkalmazást működtető mesterséges intelligencia modell (Gemini) hallucin
 
 Az alkalmazás használatával Ön tudomásul veszi, hogy a kapott elemzés kizárólag oktatási és demonstrációs célokat szolgál.
 """,
-        "return_analyzer": "Vissza az elemzőhöz"
+        "return_analyzer": "Vissza az elemzőhöz",
+        "clear_results_btn": "Eredmények Törlése és Újrakezdés"
     }
 }
