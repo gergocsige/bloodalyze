@@ -5,13 +5,14 @@ from pydantic import BaseModel, Field
 import pandas as pd
 import json
 from tenacity import retry, stop_after_attempt, wait_exponential
+from translations import translations
 
 # Define the Pydantic schema for structured output
 class Metric(BaseModel):
     metric_name: str
     patient_value: str
     standard_range: str
-    status: str = Field(description="Must be exactly 'Normal', 'High', or 'Low'")
+    status: str = Field(description="Classify the value. Use the provided language to translate 'Normal', 'High', or 'Low'.")
     improvement_tip: str
 
 class BloodTestAnalysis(BaseModel):
@@ -26,34 +27,45 @@ CRITICAL MEDICAL DISCLAIMER INSTRUCTIONS:
 - Any improvement tip must be extremely generic, conservative lifestyle advice (e.g., "stay hydrated", "eat a balanced diet rich in iron") rather than specific medical treatments or supplement prescriptions.
 - If you cannot confidently extract a value, omit it rather than guessing.
 
+STRICT LANGUAGE RULE:
+You must translate all output into {language}. The JSON keys must remain in English for parsing (metric_name, patient_value, standard_range, status, improvement_tip), but the VALUES associated with these keys (especially the 'improvement_tip' and 'status') MUST be written in {language}. For 'status', translate 'Normal', 'High', and 'Low' into {language}.
+
 EXTRACTION AND FORMATTING RULES:
 For each metric found in the uploaded test, extract the following fields and format them strictly according to the provided JSON schema:
 - metric_name: The name of the test or biomarker (e.g., "Hemoglobin", "Cholesterol").
 - patient_value: The value measured for the patient.
 - standard_range: The reference or normal range provided on the test document.
-- status: Classify the value. You MUST strictly use one of the following exact string values: "Normal", "High", or "Low".
-- improvement_tip: If the status is "High" or "Low", provide a brief, general lifestyle tip. If the status is "Normal", output "N/A".
+- status: Classify the value. You MUST strictly use one of the translated equivalent string values for: "Normal", "High", or "Low" in {language}.
+- improvement_tip: If the status is "High" or "Low", provide a brief, general lifestyle tip in {language}. If the status is "Normal", output "N/A".
 """
 
 def main():
     st.set_page_config(page_title="Bloodalyze", page_icon="🩸", layout="wide")
 
-    # Strict Medical Disclaimer
-    st.warning("⚠️ **Strict Medical Disclaimer:** This application is a University Proof of Concept (PoC) and does not provide medical advice. It is for educational purposes only. Always consult a qualified healthcare provider for medical diagnosis and treatment.")
+    if 'language' not in st.session_state:
+        st.session_state.language = 'English'
+    
+    st.sidebar.radio("Language / Nyelv", ["English", "Magyar"], key="language")
+    lang = st.session_state.language
+    t = translations[lang]
 
-    st.title("🩸 Bloodalyze")
-    st.markdown("Upload your blood test results (PDF, JPG, or PNG) to extract key metrics and receive general lifestyle tips for out-of-range values.")
+    # Strict Medical Disclaimer
+    st.warning(t["disclaimer_warning"])
+    st.page_link("pages/Disclaimer.py", label=t["read_disclaimer"], icon="ℹ️")
+
+    st.title(t["page_title"])
+    st.markdown(t["upload_desc"])
 
     # File Uploader
-    uploaded_file = st.file_uploader("Choose a file", type=['png', 'jpg', 'jpeg', 'pdf'])
+    uploaded_file = st.file_uploader(t["choose_file"], type=['png', 'jpg', 'jpeg', 'pdf'])
 
     if uploaded_file is not None:
-        if st.button("Analyze Blood Test", type="primary"):
+        if st.button(t["analyze_btn"], type="primary"):
             if "GEMINI_API_KEY" not in st.secrets or not st.secrets["GEMINI_API_KEY"] or st.secrets["GEMINI_API_KEY"] == "YOUR_API_KEY_HERE":
-                st.error("Please configure your Gemini API Key in `.streamlit/secrets.toml`.")
+                st.error(t["api_key_error"])
                 return
 
-            with st.spinner("Analyzing your blood test..."):
+            with st.spinner(t["analyzing_spinner"]):
                 try:
                     # Initialize the client
                     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
@@ -69,7 +81,7 @@ def main():
                     def _generate_content():
                         return client.models.generate_content(
                             model='gemini-3.1-flash-lite-preview',
-                            contents=[part, SYSTEM_PROMPT],
+                            contents=[part, SYSTEM_PROMPT.format(language=lang)],
                             config=types.GenerateContentConfig(
                                 response_mime_type="application/json",
                                 response_schema=BloodTestAnalysis,
@@ -83,15 +95,17 @@ def main():
                     result_json = json.loads(response.text)
                     
                     if "metrics" in result_json and len(result_json["metrics"]) > 0:
-                        st.subheader("Analysis Results")
+                        st.subheader(t["analysis_results"])
                         
-                        out_of_range = [m for m in result_json["metrics"] if m.get("status") != "Normal"]
+                        # We must accept translated normal values too
+                        normal_values = ["Normal", "Normál"]
+                        out_of_range = [m for m in result_json["metrics"] if m.get("status") not in normal_values]
                         
                         if not out_of_range:
-                            st.success("Great news! All analyzed metrics are within the standard normal ranges.")
+                            st.success(t["all_normal"])
                             st.balloons()
                         else:
-                            st.markdown("### Attention Needed")
+                            st.markdown(t["attention_needed"])
                             for m in out_of_range:
                                 status = m.get('status')
                                 name = m.get('metric_name')
@@ -100,17 +114,17 @@ def main():
                                 tip = m.get('improvement_tip')
                                 
                                 with st.expander(f"⚠️ {name} - {status}", expanded=True):
-                                    st.error(f"**Status:** {status}")
+                                    st.error(f"**{t['status_label']}:** {status}")
                                     col1, col2 = st.columns(2)
-                                    col1.metric("Patient Value", value)
-                                    col2.metric("Standard Range", ref_range)
+                                    col1.metric(t["patient_value_label"], value)
+                                    col2.metric(t["standard_range_label"], ref_range)
                                     
-                                    st.markdown(f"**💡 Tip:** {tip}")
+                                    st.markdown(f"**💡 {t['tip_label']}:** {tip}")
                     else:
-                        st.warning("No metrics could be extracted from the provided document.")
+                        st.warning(t["no_metrics"])
 
                 except Exception as e:
-                    st.error(f"An error occurred during analysis: {e}")
+                    st.error(f"{t['error_occurred']}{e}")
 
 if __name__ == "__main__":
     main()
